@@ -24,7 +24,8 @@ public class ExampleClass {
 #### Registering a class
 
 ```
-midnight.registerClass(ExampleClass.class);
+midnight.registerObject(ExampleObject.class);
+midnight.registerListener(new ExampleSubscriber());
 ```
 
 #### Sending an object

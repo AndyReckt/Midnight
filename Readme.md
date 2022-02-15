@@ -19,7 +19,6 @@ public class ExampleClass {
         Midnight midnight = new Midnight(pool);
     }
 }
-
 ```
 #### Registering a class
 

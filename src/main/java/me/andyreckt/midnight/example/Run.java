@@ -3,7 +3,6 @@ package me.andyreckt.midnight.example;
 import me.andyreckt.midnight.Midnight;
 import me.andyreckt.midnight.RedisCredentials;
 import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.JedisPoolConfig;
 
 public class Run {
 
@@ -22,9 +21,9 @@ public class Run {
 
         Midnight midnight = new Midnight(pool);
 
-        midnight.registerClass(ExampleObject.class);
-        midnight.registerClass(ExampleSubscriber.class);
+        midnight.registerObject(ExampleObject.class);
+        midnight.registerListener(new ExampleSubscriber());
 
-        midnight.sendObject(new ExampleObject("salutations", 36));
+        midnight.sendObject(new ExampleObject("hello", 36));
     }
 }

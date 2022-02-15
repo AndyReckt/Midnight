@@ -33,6 +33,7 @@
             <scope>compile</scope>
         </dependency>
     </dependencies>
+
     <build>
         <finalName>${project.name}-${project.version}</finalName>
         <defaultGoal>clean install</defaultGoal>
@@ -70,7 +71,7 @@
                 <configuration>
                     <createDependencyReducedPom>false</createDependencyReducedPom>
                     <shadedArtifactAttached>true</shadedArtifactAttached>
-                    <!--Relocations so it doesnt interfere with any other plugins-->
+                    <!--Relocations so it doesn't interfere with any other plugins-->
                     <relocations>
                         <relocation>
                             <pattern>com.google.gson</pattern>

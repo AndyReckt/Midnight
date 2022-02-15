@@ -11,7 +11,6 @@ Credit goes to [Joeleoli's Pidgin](https://github.com/joeleoli/pidgin) for the o
 #### Create the midnight instance
 ```java
 public class ExampleClass {
-
     public static void main(final String[] args) {
         // Create ur JedisPool
         JedisPool pool = new JedisPool("localhost", 6379);

@@ -1,7 +1,9 @@
 package me.andyreckt.midnight;
 
+import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import lombok.Getter;
 import lombok.SneakyThrows;
 import me.andyreckt.midnight.annotations.RedisListener;
 import me.andyreckt.midnight.annotations.RedisObject;
@@ -11,16 +13,21 @@ import redis.clients.jedis.JedisPubSub;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class Midnight {
 
-    private static final Gson GSON = new GsonBuilder().create();
+    private static final Gson GSON = new GsonBuilder()
+            .serializeNulls()
+            .setFieldNamingPolicy(FieldNamingPolicy.IDENTITY)
+            .setLenient()
+            .setPrettyPrinting()
+            .create();
     private static final String channel = "AraJedisPool";
     private static final String splitRegex = "--;@;--";
 
@@ -28,16 +35,21 @@ public class Midnight {
     private final Map<String, Class<?>> objectMap = new HashMap<>();
 
     private final Executor executor;
+    @Getter
     private final JedisPool pool;
     private JedisPubSub pubSub;
 
 
     public Midnight(JedisPool pool) {
-        System.out.println("[Midnight] >> Initializing");
+        log("Initializing...");
+        Instant instant = Instant.now();
+
         executor = Executors.newFixedThreadPool(2);
+
         this.pool = pool;
         setupPubSub(pool);
-        System.out.println("[Midnight] >> Initialized");
+
+        log("Initialized in " + (Instant.now().toEpochMilli() - instant.toEpochMilli()) + "ms");
     }
 
     @SneakyThrows
@@ -97,16 +109,17 @@ public class Midnight {
      */
     @Deprecated
     public void registerClass(Class<?> clazz) {
-        System.out.println("[Midnight] >> Using Midnight#registerClass() is deprecated, please refrain to use it.");
+        log("Using Midnight#registerClass() is deprecated, please refrain to use it.");
 
         if (clazz.getAnnotation(RedisObject.class) != null) {
             this.objectMap.put(clazz.getAnnotation(RedisObject.class).id(), clazz);
-            System.out.println("[Midnight] >> Registered class " + clazz.getSimpleName() + " as an Object");
+            log("Registered class " + clazz.getSimpleName() + " as an Object");
             return;
         }
 
         for (Method method : clazz.getDeclaredMethods()) {
             if (method.getAnnotation(RedisListener.class) != null) {
+                if (!Modifier.isStatic(method.getModifiers())) continue;
                 registerMethod(method);
             }
         }
@@ -120,7 +133,7 @@ public class Midnight {
     public void registerObject(Class<?> clazz) {
         if (clazz.getAnnotation(RedisObject.class) == null) return;
         this.objectMap.put(clazz.getAnnotation(RedisObject.class).id(), clazz);
-        System.out.println("[Midnight] >> Registered class " + clazz.getSimpleName() + " as an Object");
+        log("Registered class " + clazz.getSimpleName() + " as an Object");
     }
 
 
@@ -131,10 +144,148 @@ public class Midnight {
      */
     public void registerListener(Object clazz) {
         for (Method method : clazz.getClass().getDeclaredMethods()) {
-            if (method.getAnnotation(RedisListener.class) != null) {
-                registerMethod(method, clazz);
-            }
+            if (method.getAnnotation(RedisListener.class) == null) continue;
+            registerMethod(method, clazz);
         }
+    }
+
+    /**
+     * Caches an object in redis like a {@link HashMap}
+     *
+     * @param id The id of the object.
+     * @param value The object to cache.
+     */
+    public void cache(String id, Object value) {
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            jedis.set(id, GSON.toJson(value));
+        });
+    }
+
+
+    /**
+     * Caches an object in redis like {@link HashMap} & {@link #cache(String, Object)} but permit the caching of unique objects while using the same id.
+     * <br>
+     * ie: caching a user profile in "profile:userId"
+     *
+     * @param id The id or type of the object. (ie: profile)
+     * @param uid The unique id of the object. (ie: userId)
+     * @param value The object to cache.
+     */
+    public void cache(String id, String uid, Object value) {
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            jedis.set(id + ":::" + uid, GSON.toJson(value));
+        });
+    }
+
+
+    /**
+     * Retrieves an object from redis like {@link HashMap#get(Object)}
+     *
+     * @param id the id of the object.
+     * @param clazz the class/type of the object.
+     * @return the object, or null if not found.
+     */
+    @SneakyThrows
+    public Object get(String id, Class<?> clazz) {
+        Jedis jedis = this.pool.getResource();
+        String json = jedis.get(id);
+        if (json == null) return null;
+        return GSON.fromJson(json, clazz);
+    }
+
+    /**
+     * Retrieves an object from redis like {@link HashMap#get(Object)}
+     *
+     * @param id the id of the object.
+     * @param clazz the class/type of the object.
+     * @return the object, or null if not found.
+     */
+    @SneakyThrows
+    public Object getAsync(String id, Class<?> clazz) {
+        AtomicReference<Optional<?>> optional = new AtomicReference<>(Optional.empty());
+        CountDownLatch latch = new CountDownLatch(1);
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            String json = jedis.get(id);
+            if (json == null) {
+                latch.countDown();
+                return;
+            }
+            optional.set(Optional.of(GSON.fromJson(json, clazz)));
+            latch.countDown();
+        });
+        latch.await();
+        return optional.get().isPresent() ? optional.get().get() : null;
+    }
+
+
+    /**
+     * Retrieves an object from redis like {@link HashMap#get(Object)} & {@link #get(String, Class)} but retrieve an object which uses a unique id.
+     *
+     * @param id the id or type of the object. (ie: profile)
+     * @param uid the unique id of the object. (ie: userId)
+     * @param clazz the class/type of the object.
+     * @return the object, or null if not found.
+     */
+    @SneakyThrows
+    public Object get(String id, String uid, Class<?> clazz) {
+        Jedis jedis = this.pool.getResource();
+        String json = jedis.get(id + ":::" + uid);
+        if (json == null) return null;
+        return GSON.fromJson(json, clazz);
+    }
+
+    /**
+     * Retrieves an object asynchronously from redis like {@link HashMap#get(Object)} & {@link #get(String, Class)} but retrieve an object which uses a unique id.
+     *
+     * @param id the id or type of the object. (ie: profile)
+     * @param uid the unique id of the object. (ie: userId)
+     * @param clazz the class/type of the object.
+     * @return the object, or null if not found.
+     */
+    @SneakyThrows
+    public Object getAsnyc(String id, String uid, Class<?> clazz) {
+        AtomicReference<Optional<?>> optional = new AtomicReference<>(Optional.empty());
+        CountDownLatch latch = new CountDownLatch(1);
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            String json = jedis.get(id + ":::" + uid);
+            if (json == null) {
+                latch.countDown();
+                return;
+            }
+            optional.set(Optional.of(GSON.fromJson(json, clazz)));
+            latch.countDown();
+        });
+        latch.await();
+        return optional.get().isPresent() ? optional.get().get() : null;
+    }
+
+
+    /**
+     * Removes an object from redis like {@link HashMap#remove(Object)}
+     * @param id the id of the object.
+     */
+    public void remove(String id) {
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            jedis.del(id);
+        });
+    }
+
+
+    /**
+     * Removes an object from redis like {@link HashMap#remove(Object)} & {@link #remove(String)} but removes an object which uses a unique id.
+     * @param id the id or type of the object. (ie: profile)
+     * @param uid the unique id of the object. (ie: userId)
+     */
+    public void remove(String id, UUID uid) {
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            jedis.del(id + ":::" + uid);
+        });
     }
 
 
@@ -151,7 +302,7 @@ public class Midnight {
 
         this.dataList.add(new LData(null, method, clazz));
 
-        System.out.println("[Midnight] >> Registered method " + method.getName() + " in class " + method.getDeclaringClass().getSimpleName() + " as a Listener");
+        log("Registered method " + method.getName() + " in class " + method.getDeclaringClass().getSimpleName() + " as a Listener");
     }
 
     /**
@@ -167,7 +318,15 @@ public class Midnight {
 
         this.dataList.add(new LData(instance, method, clazz));
 
-        System.out.println("[Midnight] >> Registered method " + method.getName() + " in class " + method.getDeclaringClass().getSimpleName() + " as a Listener");
+        log("Registered method " + method.getName() + " in class " + method.getDeclaringClass().getSimpleName() + " as a Listener");
     }
-
+    
+    /**
+     * Utility to log a message to the console.
+     * 
+     * @param message The message to log.
+     */
+    public void log(String message) {
+        System.out.println("[Midnight] >> " + message);
+    }
 }

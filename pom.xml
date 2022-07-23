@@ -6,7 +6,7 @@
 
     <groupId>me.andyreckt</groupId>
     <artifactId>Midnight</artifactId>
-    <version>1.0</version>
+    <version>3.0</version>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
@@ -62,6 +62,9 @@
                 <configuration>
                     <source>1.8</source>
                     <target>1.8</target>
+                    <excludes>
+                        <exclude>**/me/andyreckt/midnight/example/*.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -76,6 +79,10 @@
                         <relocation>
                             <pattern>com.google.gson</pattern>
                             <shadedPattern>me.andyreckt.midnight.relocations.com.google.gson</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>redis.clients.jedis</pattern>
+                            <shadedPattern>me.andyreckt.midnight.relocations.redis.clients.jedis</shadedPattern>
                         </relocation>
                     </relocations>
                 </configuration>

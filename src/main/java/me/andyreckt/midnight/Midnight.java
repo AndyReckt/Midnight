@@ -245,7 +245,7 @@ public class Midnight {
      * @return the object, or null if not found.
      */
     @SneakyThrows
-    public Object getAsnyc(String id, String uid, Class<?> clazz) {
+    public Object getAsync(String id, String uid, Class<?> clazz) {
         AtomicReference<Optional<?>> optional = new AtomicReference<>(Optional.empty());
         CountDownLatch latch = new CountDownLatch(1);
         executor.execute(() -> {

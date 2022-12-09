@@ -28,7 +28,7 @@ public class Midnight {
             .setLenient()
             .setPrettyPrinting()
             .create();
-    private static final String channel = "AraJedisPool";
+    private static final String channel = "Midnight-Pool";
     private static final String splitRegex = "--;@;--";
 
     private final List<LData> dataList = new ArrayList<>();
@@ -52,6 +52,11 @@ public class Midnight {
         log("Initialized in " + (Instant.now().toEpochMilli() - instant.toEpochMilli()) + "ms");
     }
 
+    /**
+     * Setup the JedisPubSub instance.
+     *
+     * @param pool The JedisPool instance.
+     */
     @SneakyThrows
     private void setupPubSub(JedisPool pool) {
         if (this.pubSub != null) return;
@@ -85,11 +90,10 @@ public class Midnight {
     }
 
     /**
-     * Sends a class through redis
+     * Sends an object through redis.
      *
-     * @param object the instance of the class to send
+     * @param object the instance of the class to send.
      */
-
     @SneakyThrows
     public void sendObject(Object object) {
         executor.execute(() -> {
@@ -99,7 +103,6 @@ public class Midnight {
             jedis.publish(channel, object.getClass().getAnnotation(RedisObject.class).id() + splitRegex + toSend);
         });
     }
-
 
     /**
      * Scan a class and registers it as an RedisObject if possible,
@@ -136,7 +139,6 @@ public class Midnight {
         log("Registered class " + clazz.getSimpleName() + " as an Object");
     }
 
-
     /**
      * Scan a class and checks if any method in the class can be registered as a RedisListener
      *
@@ -162,7 +164,6 @@ public class Midnight {
         });
     }
 
-
     /**
      * Caches an object in redis like {@link HashMap} & {@link #cache(String, Object)} but permit the caching of unique objects while using the same id.
      * <br>
@@ -178,7 +179,6 @@ public class Midnight {
             jedis.set(id + ":::" + uid, GSON.toJson(value));
         });
     }
-
 
     /**
      * Retrieves an object from redis like {@link HashMap#get(Object)}
@@ -219,7 +219,6 @@ public class Midnight {
         latch.await();
         return optional.get().isPresent() ? optional.get().get() : null;
     }
-
 
     /**
      * Retrieves an object from redis like {@link HashMap#get(Object)} & {@link #get(String, Class)} but retrieve an object which uses a unique id.
@@ -263,6 +262,48 @@ public class Midnight {
         return optional.get().isPresent() ? optional.get().get() : null;
     }
 
+    /**
+     * Retrieves all unique ids and objects associated with a specific id.
+     *
+     * @param id the id or type of the object. (ie: profile)
+     * @param clazz the class/type of the object.
+     * @return a map of unique ids and objects.
+     */
+    @SneakyThrows
+    public HashMap<String, Object> getAll(String id, Class<?> clazz) {
+        Jedis jedis = this.pool.getResource();
+        HashMap<String, Object> map = new HashMap<>();
+        jedis.keys(id + ":::*").forEach(key -> {
+            String json = jedis.get(key);
+            if (json == null) return;
+            map.put(key.replace(id + ":::", ""), GSON.fromJson(json, clazz));
+        });
+        return map;
+    }
+
+    /**
+     * Retrieves all unique ids and objects associated with a specific id asynchronously.
+     *
+     * @param id the id or type of the object. (ie: profile)
+     * @param clazz the class/type of the object.
+     * @return a map of unique ids and objects.
+     */
+    @SneakyThrows
+    public HashMap<String, Object> getAllAsync(String id, Class<?> clazz) {
+        AtomicReference<HashMap<String, Object>> map = new AtomicReference<>(new HashMap<>());
+        CountDownLatch latch = new CountDownLatch(1);
+        executor.execute(() -> {
+            Jedis jedis = this.pool.getResource();
+            jedis.keys(id + ":::*").forEach(key -> {
+                String json = jedis.get(key);
+                if (json == null) return;
+                map.get().put(key.replace(id + ":::", ""), GSON.fromJson(json, clazz));
+            });
+            latch.countDown();
+        });
+        latch.await();
+        return map.get();
+    }
 
     /**
      * Removes an object from redis like {@link HashMap#remove(Object)}
@@ -275,7 +316,6 @@ public class Midnight {
         });
     }
 
-
     /**
      * Removes an object from redis like {@link HashMap#remove(Object)} & {@link #remove(String)} but removes an object which uses a unique id.
      * @param id the id or type of the object. (ie: profile)
@@ -287,7 +327,6 @@ public class Midnight {
             jedis.del(id + ":::" + uid);
         });
     }
-
 
     /**
      * Registers a method as a RedisListener.
